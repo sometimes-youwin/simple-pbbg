@@ -1,0 +1,13 @@
+[private]
+@default:
+    just --list
+
+run *args:
+    deno run -A --unstable-ffi main.ts {{ args }}
+
+run-clean *args:
+    rm pbbg.db
+    @just run {{ args }}
+
+test *args:
+    deno test -A --unstable-ffi
