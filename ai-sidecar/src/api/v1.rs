@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{llm, server::AppState};
+use crate::{history, llm, server::AppState};
 
 const AUTH_HEADER_KEY: &str = "secret";
 
@@ -112,6 +112,7 @@ impl Into<llm::Options> for GenerateRequest {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum GenerateResponse {
+    Success { message: String },
     Busy,
     GenerateError { message: String },
 }
@@ -130,20 +131,18 @@ async fn handle_generate(
         return (StatusCode::UNAUTHORIZED, Json(GenerateResponse::Busy)).into_response();
     }
 
-    {
-        let mut ai_active = state.ai_active.lock().await;
-        if *ai_active {
-            tracing::warn!("already generating text");
+    let mut ai_active = state.ai_active.lock().await;
+    if *ai_active {
+        tracing::warn!("already generating text");
 
-            return (StatusCode::CONFLICT, Json(GenerateResponse::Busy)).into_response();
-        }
-        *ai_active = true;
+        return (StatusCode::CONFLICT, Json(GenerateResponse::Busy)).into_response();
     }
+    *ai_active = true;
 
     let ai_model = state.ai_model.clone();
     let mut history = &mut state.history.lock().await;
 
-    let Ok(stream) = llm::generate_text(&ai_model, &mut history, req) else {
+    let Ok(output) = llm::generate_text(&ai_model, &mut history, req) else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(GenerateResponse::GenerateError {
@@ -153,7 +152,12 @@ async fn handle_generate(
             .into_response();
     };
 
-    let body = Body::from_stream(stream);
+    *ai_active = false;
+    history.push(history::MessageType::Assistant, output.clone());
 
-    (StatusCode::OK, body).into_response()
+    (
+        StatusCode::OK,
+        Json(GenerateResponse::Success { message: output }),
+    )
+        .into_response()
 }

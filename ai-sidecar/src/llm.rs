@@ -5,10 +5,6 @@ use crate::history::{self, History};
 
 const DEFAULT_MAX_TOKENS: usize = 128;
 
-/// Only used to satisfy stream requirements to return a Result.
-#[derive(Debug, thiserror::Error)]
-pub enum PhantomError {}
-
 #[derive(Debug)]
 pub struct Options {
     pub setup: Option<String>,
@@ -20,7 +16,7 @@ pub fn generate_text(
     model: &LlamaModel,
     history: &mut History,
     opts: impl Into<Options>,
-) -> Result<impl Stream<Item = Result<String, PhantomError>>, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error>> {
     let Options {
         setup,
         prompt,
@@ -43,12 +39,8 @@ pub fn generate_text(
             StandardSampler::default(),
             max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
         )?
-        .into_strings();
+        .into_string();
 
     // https://docs.rs/tokio/latest/tokio/stream/
-    Ok(async_stream::stream! {
-        for completion in completions {
-            yield Ok(completion);
-        }
-    })
+    Ok(completions)
 }
