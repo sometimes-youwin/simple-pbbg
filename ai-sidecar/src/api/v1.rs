@@ -1,5 +1,4 @@
 use axum::{
-    body::Body,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
@@ -50,11 +49,11 @@ async fn handle_is_busy(State(state): State<AppState>, headers: HeaderMap) -> im
         return (StatusCode::UNAUTHORIZED, Json(IsBusyResponse::Busy));
     }
 
-    let ai_active = state.ai_active.lock().await;
+    let lock_is_err = state.history.try_lock().is_err();
 
     (
         StatusCode::OK,
-        Json(match *ai_active {
+        Json(match lock_is_err {
             true => IsBusyResponse::Busy,
             false => IsBusyResponse::Ready,
         }),
@@ -78,15 +77,13 @@ async fn clear_history(State(state): State<AppState>, headers: HeaderMap) -> imp
         return (StatusCode::UNAUTHORIZED, Json(ClearHistoryResponse::Busy));
     }
 
-    {
-        let ai_active = state.ai_active.lock().await;
-        if *ai_active {
+    let mut history = match state.history.try_lock() {
+        Ok(v) => v,
+        Err(_) => {
             tracing::error!("tried to clear text while generating text");
             return (StatusCode::CONFLICT, Json(ClearHistoryResponse::Busy));
         }
-    }
-
-    let mut history = state.history.lock().await;
+    };
     history.clear();
 
     (StatusCode::OK, Json(ClearHistoryResponse::Success))
@@ -131,16 +128,14 @@ async fn handle_generate(
         return (StatusCode::UNAUTHORIZED, Json(GenerateResponse::Busy)).into_response();
     }
 
-    let mut ai_active = state.ai_active.lock().await;
-    if *ai_active {
-        tracing::warn!("already generating text");
-
-        return (StatusCode::CONFLICT, Json(GenerateResponse::Busy)).into_response();
-    }
-    *ai_active = true;
-
     let ai_model = state.ai_model.clone();
-    let mut history = &mut state.history.lock().await;
+    let mut history = match state.history.try_lock() {
+        Ok(v) => v,
+        Err(_) => {
+            tracing::warn!("already generating text");
+            return (StatusCode::CONFLICT, Json(GenerateResponse::Busy)).into_response();
+        }
+    };
 
     let Ok(output) = llm::generate_text(&ai_model, &mut history, req) else {
         return (
@@ -152,7 +147,6 @@ async fn handle_generate(
             .into_response();
     };
 
-    *ai_active = false;
     history.push(history::MessageType::Assistant, output.clone());
 
     (

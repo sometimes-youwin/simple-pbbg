@@ -18,9 +18,6 @@ pub enum ServerError {
 
 #[derive(Clone)]
 pub struct AppState {
-    // NOTE we could use an atomic bool here but it doesn't support clone
-    // It's easy to implement but I'm lazy
-    pub ai_active: Arc<Mutex<bool>>,
     pub ai_model: Arc<LlamaModel>,
     pub secret: Arc<String>,
     pub history: Arc<Mutex<History>>,
@@ -41,7 +38,6 @@ pub async fn serve() -> Result<(), ServerError> {
     );
 
     let state = AppState {
-        ai_active: Arc::new(Mutex::new(false)),
         ai_model: Arc::new(ai_model),
         secret: Arc::new(secret),
         history: Arc::new(Mutex::new(history)),

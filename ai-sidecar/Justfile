@@ -1,0 +1,12 @@
+set dotenv-load
+
+[private]
+@default:
+    just --list
+
+env:
+    echo $AI_SIDECAR_SECRET
+    echo $AI_SIDECAR_PORT
+
+run *args:
+    cargo run

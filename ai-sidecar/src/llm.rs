@@ -1,4 +1,3 @@
-use futures_core::Stream;
 use llama_cpp::{standard_sampler::StandardSampler, LlamaModel, SessionParams};
 
 use crate::history::{self, History};
@@ -41,6 +40,5 @@ pub fn generate_text(
         )?
         .into_string();
 
-    // https://docs.rs/tokio/latest/tokio/stream/
     Ok(completions)
 }
