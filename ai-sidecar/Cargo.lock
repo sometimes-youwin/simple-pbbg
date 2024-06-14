@@ -34,6 +34,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "chrono",
+ "futures-core",
  "llama_cpp",
  "serde",
  "serde_json",

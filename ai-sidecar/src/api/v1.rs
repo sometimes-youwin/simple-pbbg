@@ -1,4 +1,5 @@
 use axum::{
+    body::{Body, HttpBody},
     extract::State,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
@@ -137,7 +138,7 @@ async fn handle_generate(
         }
     };
 
-    let Ok(output) = llm::generate_text(&ai_model, &mut history, req) else {
+    let Ok(stream) = llm::generate_text(&ai_model, &mut history, req) else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(GenerateResponse::GenerateError {
@@ -147,11 +148,13 @@ async fn handle_generate(
             .into_response();
     };
 
-    history.push(history::MessageType::Assistant, output.clone());
+    // history.push(history::MessageType::Assistant, output.clone());
 
-    (
-        StatusCode::OK,
-        Json(GenerateResponse::Success { message: output }),
-    )
-        .into_response()
+    (StatusCode::OK, Body::from_stream(stream)).into_response()
+
+    // (
+    //     StatusCode::OK,
+    //     Json(GenerateResponse::Success { message: output }),
+    // )
+    //     .into_response()
 }
