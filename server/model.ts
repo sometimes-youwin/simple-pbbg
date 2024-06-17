@@ -1,3 +1,9 @@
+import { Body } from "jsr:@oak/oak@^16.1.0/body";
+
+import * as log from "/logger.ts";
+export * as GameMessage from "/model/game_message.ts";
+export * as ClientMessage from "/model/client_message.ts";
+
 /**
  * Configuration for the app.
  */
@@ -19,6 +25,8 @@ export type AppConfig = {
    * then no db file is created.
    */
   dbPath: string,
+
+  testing: boolean,
 };
 
 /**
@@ -44,7 +52,9 @@ export function parseArgs(): AppConfig {
     }
   }
 
-  return { verbose, quiet, port, dbPath };
+  const testing = args.includes("--testing");
+
+  return { verbose, quiet, port, dbPath, testing };
 }
 
 export type ApiErrorType =
@@ -65,28 +75,55 @@ export function apiErrorString(input: ApiError): string {
   return JSON.stringify(input);
 }
 
+export async function tryParseJson<T>(body: Body) {
+  try {
+    const out: T = await body.json();
+    return out;
+  } catch (e) {
+    log.error(e);
+    return null;
+  }
+}
+
+/**
+ * Verifies that a given object contains the given fields. If a field is missing,
+ * that field is returned otherwise null.
+ * @param obj The object to validate.
+ * @param fields The expected fields.
+ * @returns The missing field or null.
+ */
+function validateModelInner<T extends object>(obj: T, fields: string[]) {
+  for (const field of fields) {
+    if (!Object.hasOwn(obj, field)) {
+      return field;
+    }
+  }
+
+  return null;
+}
+
 export type RegisterRequest = {
   username: string,
   password: string,
   email: string,
 };
 
+export function validateRegisterRequest(req: RegisterRequest) {
+  return validateModelInner(req, [
+    "username",
+    "password",
+    "email"
+  ]);
+}
+
 export type LoginRequest = {
   username: string,
   password: string,
 };
 
-type Message = {
-  type: string;
-};
-
-export type ClientMessageChat = Message & {
-  content: string;
-};
-
-export type GameMessageChat = Message & {
-  from: string,
-  target: string,
-  content: string,
-};
-
+export function validateLoginRequest(req: LoginRequest) {
+  return validateModelInner(req, [
+    "username",
+    "password"
+  ]);
+}

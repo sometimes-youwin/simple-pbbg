@@ -79,6 +79,15 @@ create table ownedResources (
     foreign key (forId) references user (id)
 );
 
+create table actionMetadata (
+    forId integer not null,
+
+    battleCount integer not null default 0,
+    metalCount integer not null default 0,
+    elecCount integer not null default 0,
+    bioCount integer not null default 0
+);
+
 create table userSession (
     -- Only needed since the same user could log in from multiple devices
     ipAddress text not null,
@@ -103,12 +112,12 @@ values
     -- Special account that is controlled by the game
     (1, 'system', 'SYSTEM', '', '');
 
-insert into channel (forId, channelName)
+insert into channel (id, forId, channelName)
 values
     -- System messages (e.g. the server is restarting)
-    (1, 'system'),
+    (0, 1, 'system'),
     -- Global messages (e.g. player announcements)
-    (1, 'global');
+    (1, 1, 'global');
 
 insert into ownedResources (forId)
 values

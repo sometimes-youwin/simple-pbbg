@@ -1,6 +1,8 @@
 import { Database, Statement } from "@db/sqlite";
 
-import * as log from "./logger.ts";
+import * as log from "/logger.ts";
+import * as rows from "/rows.ts";
+import { AppConfig, ClientMessage, GameMessage, } from "/model.ts";
 
 type RawSql = string;
 
@@ -23,9 +25,19 @@ export type AppStatePrepareOpts = {
  */
 export class AppState {
   /**
+   * The parsed application config.
+   */
+  config: AppConfig;
+
+  /**
    * The database connection.
    */
   db: Database;
+
+  /**
+   * The actual game that is running on a background thread.
+   */
+  gameWorker: Worker;
 
   /**
    * Cached prepared statements.
@@ -40,7 +52,7 @@ export class AppState {
   /**
    * The max amount of prepared statements to cache.
    */
-  #preparedStmtCacheMax: number = 128;
+  #preparedStmtCacheMax: number = 64;
 
   /**
    * Active websocket connections. Tracks every active connection.
@@ -57,18 +69,65 @@ export class AppState {
   /**
    * Chat channels with a list of users subscribed to that channel.
    */
-  #channels = new Map<ChannelId, UserId[]>()
+  #channels = new Map<ChannelId, UserId[]>();
 
-  constructor(db: Database, opts?: AppStateOpts) {
+  constructor(config: AppConfig, db: Database, gameWorker: Worker, opts?: AppStateOpts) {
     log.info("creating app state");
 
+    this.config = config;
     this.db = db;
+    this.gameWorker = gameWorker;
+    this.gameWorker.onmessage = (evt) => this.#handleGameMessage(evt);
 
     if (opts?.preparedStmtCacheMax) {
       this.#preparedStmtCacheMax = opts.preparedStmtCacheMax;
     }
 
+    this.#channels.set(rows.SYSTEM_CHANNEL_ID, []);
+    this.#channels.set(rows.GLOBAL_CHANNEL_ID, []);
+
     log.info("created app state");
+  }
+
+  #handleGameMessage(evt: MessageEvent) {
+    const data: GameMessage.Base = evt.data;
+    switch (data.type) {
+      case "INTERNAL": {
+        this.#handleInternalMessage(data as GameMessage.Internal);
+        break;
+      }
+      case "SYSTEM": {
+        this.sendChannel(rows.SYSTEM_CHANNEL_ID, (data as GameMessage.System).message ?? "empty system message");
+        break;
+      }
+      case "NONE":
+      default: {
+        log.error(`unhandled game message ${data}`);
+        break;
+      }
+    }
+  }
+
+  #handleInternalMessage(m: GameMessage.Internal) {
+    switch (m.command) {
+      case "SHUTDOWN": {
+        this.shutdown();
+        break;
+      }
+      case "NONE":
+      default: {
+        log.error(`unhandled internal message ${m}`);
+        break;
+      }
+    }
+  }
+
+  /**
+   * Forwards a message from a connected client websocket to the game.
+   * @param message The parsed message.
+   */
+  forwardClientMessage(message: ClientMessage.Base) {
+    this.gameWorker.postMessage(message);
   }
 
   /**
@@ -119,12 +178,12 @@ export class AppState {
     return stmt as Statement;
   }
 
-  addUser(userId: UserId, address: ConnectAddress, ws: WebSocket) {
-    log.debug(`adding user ${userId} from address ${address}`);
+  addUser(user: rows.User, address: ConnectAddress, ws: WebSocket) {
+    log.debug(`adding user ${user.id} from address ${address}`);
 
     this.#wsConnections.set(address, ws);
 
-    const addresses = findOrSetInMap(this.#connectedUsers, userId);
+    const addresses = findOrSetInMap(this.#connectedUsers, user.id);
     addresses.push(address);
 
     ws.onclose = (_ev) => {
@@ -132,12 +191,20 @@ export class AppState {
 
       const addressIdx = addresses.indexOf(address);
       if (addressIdx < 0) {
-        log.error(`while cleaning up ws for ${userId} - ${address}, failed to remove user address`);
+        log.error(`while cleaning up ws for ${user.id} - ${address}, failed to remove user address`);
         return;
       }
 
       addresses.splice(addressIdx, 1);
     }
+
+    const internalMessage: ClientMessage.InternalAddUser = {
+      type: "INTERNAL",
+      command: "ADD_USER",
+      user
+    };
+
+    this.forwardClientMessage(internalMessage);
   }
 
   /**
@@ -269,6 +336,13 @@ export class AppState {
       log.error(`channel ${channelId} does not exist`);
       return false;
     }
+  }
+
+  shutdown() {
+    // TODO stub
+
+    this.gameWorker.terminate();
+    Deno.exit();
   }
 }
 

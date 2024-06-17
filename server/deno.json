@@ -3,7 +3,9 @@
     "dev": "deno run --watch main.ts"
   },
   "imports": {
+    "/": "./",
     "@db/sqlite": "jsr:@db/sqlite@^0.11.1",
-    "@oak/oak": "jsr:@oak/oak@^16.1.0"
+    "@oak/oak": "jsr:@oak/oak@^16.1.0",
+    "@std/async": "jsr:@std/async@^0.224.2"
   }
 }

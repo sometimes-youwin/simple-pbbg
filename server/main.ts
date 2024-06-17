@@ -1,19 +1,19 @@
 import { Application, isErrorStatus, isHttpError } from "@oak/oak";
 import { Router } from "@oak/oak/router";
 import { Database, Statement } from "@db/sqlite";
-// TODO https://medium.com/nybles/a-complete-guide-to-deno-and-oak-with-authentication-using-bcrypt-and-djwt-with-mongodb-as-cbe4b604de9f
-import { validate, create } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
 import { existsSync } from "jsr:@std/fs@^0.221.0/exists";
 
-import { AppConfig, LoginRequest, RegisterRequest, apiErrorString, parseArgs } from "./model.ts";
-import * as rows from "./rows.ts";
-import { User, applyMigrations } from "./rows.ts";
-import { AppState } from "./app_state.ts";
-import * as log from "./logger.ts";
-import * as auth from "./auth.ts";
+import { AppConfig, LoginRequest, RegisterRequest, apiErrorString, parseArgs, tryParseJson, validateLoginRequest, validateRegisterRequest } from "/model.ts";
+import * as rows from "/rows.ts";
+import { User, applyMigrations } from "/rows.ts";
+import { AppState } from "/app_state.ts";
+import * as log from "/logger.ts";
+import * as auth from "/auth.ts";
+import { createUser } from "/user_util.ts";
 
 const APP_NAME = "Simple PBBG";
 const VERSION = "0.1.0";
+
 /**
  * Global application state. This pattern kind of sucks, but is easier to reason
  * about than dealing with context type hell.
@@ -34,6 +34,10 @@ let appState: AppState;
 function initRouter(router: Router, config: AppConfig) {
   log.info("initializing router");
 
+  if (config.testing) {
+    // TODO add testing endpoints
+  }
+
   router.get("/", async (ctx) => {
     await ctx.send({
       root: `${Deno.cwd()}/static`,
@@ -42,64 +46,17 @@ function initRouter(router: Router, config: AppConfig) {
   });
 
   router.get("/game", async (ctx) => {
-    const urlPath = ctx.request.url.pathname;
-
     const cookies = ctx.cookies;
-    let existingSession = await cookies.get(auth.SESSION_COOKIE_KEY);
+    const existingSession = await cookies.get(auth.SESSION_COOKIE_KEY);
     if (!existingSession) {
-      const jwtToken = await cookies.get(auth.JWT_COOKIE_KEY);
-      if (!jwtToken) {
-        ctx.throw(401, apiErrorString({
-          // Login-related error, jwt not set
-          type: "LOGIN",
-          path: urlPath,
-          message: "no jwt token found"
-        }));
-        return;
-      }
-
-      const jwtPayload = await auth.verifyJwt(jwtToken);
-      if (!jwtPayload) {
-        ctx.throw(401, apiErrorString({
-          // Login-related error, jwt is expired
-          type: "LOGIN",
-          path: urlPath,
-          message: "jwt token is expired"
-        }));
-        return;
-      }
-
-      const userId = jwtPayload.userId;
-      if (typeof (userId) !== "number") {
-        ctx.throw(400, apiErrorString({
-          type: "LOGIN",
-          path: urlPath,
-          message: "jwt payload is malformed"
-        }));
-        return;
-      }
-
-      const sessionId = await rows.createSessionForUser(
-        appState, ctx.request.ip, userId);
-      if (!sessionId) {
-        ctx.throw(500, apiErrorString({
-          type: "LOGIN",
-          path: urlPath,
-          message: "unable to generate session"
-        }));
-        return;
-      }
-
-      existingSession = sessionId;
-      await cookies.set(auth.SESSION_COOKIE_KEY, existingSession);
+      ctx.response.redirect("/");
+      await cookies.set(auth.SESSION_COOKIE_KEY, "missing");
+      return;
     }
 
     if (!rows.verifySessionId(appState, existingSession)) {
-      ctx.throw(401, apiErrorString({
-        type: "LOGIN",
-        path: urlPath,
-        message: "session is invalid, please login again"
-      }));
+      ctx.response.redirect("/");
+      await cookies.set(auth.SESSION_COOKIE_KEY, "invalid");
       return;
     }
 
@@ -109,71 +66,207 @@ function initRouter(router: Router, config: AppConfig) {
     });
   });
 
-  // TODO
   router.post("/register", async (ctx) => {
     const req = ctx.request;
-    const body: RegisterRequest = await req.body.json();
+    const body = await tryParseJson<RegisterRequest>(req.body);
     if (!body) {
       ctx.throw(400, apiErrorString({
         type: "REGISTER",
-        path: ctx.request.url.pathname
+        path: req.url.pathname,
+        message: "invalid body"
+      }));
+      return;
+    }
+
+    const invalidField = validateRegisterRequest(body);
+    if (invalidField) {
+      ctx.throw(400, apiErrorString({
+        type: "REGISTER",
+        path: req.url.pathname,
+        message: `field missing - ${invalidField}`
       }));
       return;
     }
 
     const { username, password, email } = body;
 
-    const registerCheck = appState.prepare("select * from user where username = ? or email = ?");
-    if (!registerCheck) {
-      ctx.throw(500, "unable to prepare register check statement");
+    const userExists = rows.userExists(appState, username, email);
+    if (userExists) {
+      ctx.throw(400, apiErrorString({
+        type: "REGISTER",
+        path: req.url.pathname
+      }));
       return;
     }
-    const registerCheckOutput = registerCheck.all<User>(username, email);
-    // TODO stub
+
+    const user = rows.createUser(appState, username, await auth.hashPassword(password), email);
+    if (!user) {
+      ctx.throw(500, apiErrorString({
+        type: "REGISTER",
+        path: req.url.pathname,
+        message: "registration db failure"
+      }));
+      return;
+    }
+
+    const userSession = rows.createSessionForUser(appState, req.ip, user.id);
+    if (!userSession) {
+      ctx.throw(500, apiErrorString({
+        type: "REGISTER",
+        path: req.url.pathname,
+        message: "unable generate session"
+      }));
+      return;
+    }
+
+    ctx.cookies.set(auth.SESSION_COOKIE_KEY, userSession.sessionId);
+
+    // TODO testing
+    if (appState.config.testing) {
+      ctx.response.type = "application/json";
+      ctx.response.body = JSON.stringify({
+        session: userSession.sessionId,
+
+        userId: user.id,
+        username: user.username,
+        password: user.hashedPassword
+      });
+      return;
+    }
+
+    ctx.response.redirect("/game");
   });
 
   router.post("/login", async (ctx) => {
     const req = ctx.request;
-    const body: LoginRequest = await req.body.json();
+    const body = await tryParseJson<LoginRequest>(req.body);
     if (!body) {
       ctx.throw(400, apiErrorString({
         type: "LOGIN",
-        path: ctx.request.url.pathname,
-        message: "no body found"
+        path: req.url.pathname,
+        message: "invalid body"
       }))
       return;
     }
 
-    const username = body.username;
-    const password = body.password;
+    const missingField = validateLoginRequest(body);
+    if (missingField) {
+      ctx.throw(400, apiErrorString({
+        type: "LOGIN",
+        path: req.url.pathname,
+        message: `field missing - ${missingField}`
+      }));
+      return;
+    }
+
+    const { username, password } = body;
+    if (!username || !password) {
+      ctx.throw(400, apiErrorString({
+        type: "LOGIN",
+        path: req.url.pathname,
+        message: "malformed body"
+      }));
+      return;
+    }
 
     const user = rows.getUserByUsername(appState, username);
     if (!user || !await auth.comparePasswords(password, user.hashedPassword)) {
       // Do not specify if the user or password was incorrect
       ctx.throw(401, apiErrorString({
         type: "LOGIN",
-        path: ctx.request.url.pathname
+        path: req.url.pathname
       }));
       return;
     }
 
-    const jwtToken = await auth.createJwt(APP_NAME, user.id);
-    ctx.cookies.set(auth.JWT_COOKIE_KEY, jwtToken);
+    const userSession = rows.createSessionForUser(appState, req.ip, user.id);
+    if (!userSession) {
+      ctx.throw(500, apiErrorString({
+        type: "LOGIN",
+        path: req.url.pathname,
+        message: "failed to generate session"
+      }));
+      return;
+    }
+
+    ctx.cookies.set(auth.SESSION_COOKIE_KEY, userSession.sessionId);
 
     ctx.response.redirect("/game");
   });
 
   router.get("/ws", async (ctx) => {
-    if (!ctx.isUpgradable) {
-      ctx.throw(501, apiErrorString({
+    const req = ctx.request;
+    const cookies = ctx.cookies;
+    const sessionToken = await cookies.get(auth.SESSION_COOKIE_KEY);
+    if (!sessionToken) {
+      ctx.throw(401, apiErrorString({
         type: "WEBSOCKET",
-        path: ctx.request.url.pathname,
-        message: "could not upgrade websocket connection"
+        path: req.url.pathname,
+        message: "no session found"
       }));
       return;
     }
-    const socket = ctx.upgrade();
-    const address = ctx.request.ip;
+
+    if (!rows.verifySessionId(appState, sessionToken)) {
+      ctx.throw(401, apiErrorString({
+        type: "WEBSOCKET",
+        path: req.url.pathname,
+        message: "invalid session"
+      }));
+      return;
+    }
+
+    const user = rows.getUserBySession(appState, sessionToken);
+    if (!user) {
+      ctx.throw(500, apiErrorString({
+        type: "WEBSOCKET",
+        path: req.url.pathname,
+        message: "error while getting user"
+      }));
+      return;
+    }
+
+    if (!ctx.isUpgradable) {
+      ctx.throw(400, apiErrorString({
+        type: "WEBSOCKET",
+        path: req.url.pathname,
+        message: "connection not upgradable"
+      }));
+      return;
+    }
+
+    let socket: WebSocket | null = null;
+    try {
+      socket = ctx.upgrade();
+    } catch (err) {
+      log.error(err);
+      ctx.throw(500, apiErrorString({
+        type: "WEBSOCKET",
+        path: req.url.pathname,
+        message: "unable to upgrade connection"
+      }));
+      return;
+    }
+    if (!socket) {
+      ctx.throw(500, apiErrorString({
+        type: "WEBSOCKET",
+        path: req.url.pathname,
+        message: "ws upgraded but no socket object present"
+      }));
+      return;
+    }
+    const address = req.ip;
+
+    appState.addUser(user, address, socket);
+
+    const channelSubs = rows.getChannelSubscriptionByUserId(appState, user.id);
+    if (!channelSubs) {
+      ctx.throw(500, apiErrorString({
+        type: "WEBSOCKET",
+        path: req.url.pathname,
+        message: ""
+      }));
+    }
   });
 
   log.info("finished initializing router");
@@ -185,6 +278,10 @@ function initMiddleware(app: Application, config: AppConfig) {
   const HEADERS = {
     responseTime: "X-Response-Time"
   };
+
+  if (config.testing) {
+    // TODO testing middleware
+  }
 
   // Logging
   app.use(async (ctx, next) => {
@@ -218,8 +315,6 @@ function initMiddleware(app: Application, config: AppConfig) {
       if (isHttpError(err)) {
         const resp = ctx.response;
         resp.status = err.status;
-        // Error objects from routes will always be stringified
-        resp.type = "application/json";
         resp.body = err.message;
       } else {
         log.error(`unhandled error ${err}`);
@@ -239,7 +334,14 @@ async function main(config: AppConfig) {
   const db = new Database(config.dbPath);
   applyMigrations(db, dbExists);
 
-  appState = new AppState(db);
+  const gameWorker = new Worker(import.meta.resolve("./game.ts"), {
+    type: "module"
+  });
+
+  gameWorker.postMessage("hello");
+  gameWorker.postMessage("world");
+
+  appState = new AppState(config, db, gameWorker);
 
   const router = new Router();
   initRouter(router, config);
@@ -252,9 +354,24 @@ async function main(config: AppConfig) {
 
   log.info(`server starting on port ${config.port}`);
 
+  // TODO testing
+  if (config.testing) {
+    const output = createUser(appState, "test", "test", "test");
+    log.debug(output);
+  }
+
+  Deno.addSignalListener("SIGINT", () => {
+    log.info("SIGINT received");
+    appState.shutdown();
+  });
+
   await app.listen({
     port: config.port
   });
+
+  // In theory, it is not possible to reach this point since the server should
+  // never go down without SIGINT. Just in case, call shutdown to cleanup here.
+  appState.shutdown();
 }
 
 if (import.meta.main) {
@@ -263,5 +380,5 @@ if (import.meta.main) {
   log.setup(config);
   log.info("logging initialized");
 
-  main(config);
+  await main(config);
 }

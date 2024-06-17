@@ -1,9 +1,9 @@
 import { Database } from "@db/sqlite";
 
-import { AppState } from "./app_state.ts";
-import * as log from "./logger.ts";
-import * as dateUtil from "./date_util.ts";
-import * as auth from "./auth.ts";
+import { AppState } from "/app_state.ts";
+import * as log from "/logger.ts";
+import * as dateUtil from "/date_util.ts";
+import * as auth from "/auth.ts";
 
 /**
  * Types in this file are purposely mapped 1-to-1 with their sql equivalents.
@@ -12,7 +12,22 @@ import * as auth from "./auth.ts";
  * 
  * Data types are not necessarily indicative of the actual type. SQLite only
  * allows for a few data types by default.
+ * 
+ * # Errors
+ * 
+ * All normal row functions will throw errors. Migrations are the only caught
+ * errors, since those are, in theory, recoverable.
+ * 
+ * # NOTE
+ * 
+ * All types queried from the database follow column null constraints. Therefore,
+ * no validation functions should be defined since they are already handled by
+ * the database.
  */
+
+function prepErr(reason: string) {
+  return `unable to prepare sql stmt - ${reason}`
+}
 
 /**
  * Apply migrations if they have not been applied yet.
@@ -178,6 +193,13 @@ export function findMigrationById(state: AppState, id: number) {
   return stmt.get<Migration>(id);
 }
 
+// export function writeObject<T>(state: AppState, obj: T) {
+//   state.prepare()
+// }
+
+export const ROOT_USER_ID = 0;
+export const SYSTEM_USER_ID = 1;
+
 export type User = {
   id: number,
 
@@ -230,10 +252,23 @@ export type UserRole =
  */
 export type LastAction = "NONE" | "BATTLE" | "METAL_SCRAP" | "ELEC_SCRAP" | "BIO_SCRAP";
 
+export function userExists(state: AppState, username: string, email: string) {
+  const stmt = state.prepare(
+    "select * from user where username = ? or email = ?");
+  if (!stmt) {
+    log.error(prepErr("user exists"));
+    return false;
+  }
+
+  const user = stmt.get<User>(username, email);
+
+  return user ? true : false;
+}
+
 export function getUserByUsername(state: AppState, username: string) {
   const stmt = state.prepare("select * from user where username = ? limit 1");
   if (!stmt) {
-    log.error("unable to create prepared statement to get user by username");
+    log.error(prepErr("get user by username"));
     return null;
   }
 
@@ -245,12 +280,32 @@ export function getUserByUsername(state: AppState, username: string) {
 export function getUserById(state: AppState, id: number) {
   const stmt = state.prepare("select * from user where id = ? limit 1");
   if (!stmt) {
-    log.error("unable to create prepared statement to get user by id")
+    log.error(prepErr("get user by id"));
     return null;
   }
 
   const user = stmt.get<User>(id);
 
+  return user ?? null;
+}
+
+export function createUser(
+  state: AppState,
+  username: string,
+  hashedPassword: string,
+  email: string
+) {
+  const stmt = state.prepare(`
+    insert into user (username, hashedPassword, email)
+    values (?, ?, ?)
+    returning *;
+  `);
+  if (!stmt) {
+    log.error(prepErr("create user"));
+    return null;
+  }
+
+  const user = stmt.get<User>(username, hashedPassword, email);
   return user ?? null;
 }
 
@@ -275,16 +330,50 @@ export type LogType =
 
 export type InvolvedType = "NONE" | "USER" | "CHANNEL";
 
+export const SYSTEM_CHANNEL_ID = 0;
+export const GLOBAL_CHANNEL_ID = 1;
+
 export type Channel = {
   id: number,
   forId: number,
   channelName: string,
 };
 
+
+
 export type ChannelSubscription = {
   forId: number,
   channelId: number,
 };
+
+export function createChannelSubscription(state: AppState, userId: number, channelId: number) {
+  const stmt = state.prepare(`
+    insert into channelSubscription (forId, channelId)
+    values (?, ?)
+    returning *;
+  `);
+  if (!stmt) {
+    log.error(prepErr("create channel subscription"));
+    return null;
+  }
+
+  const channelSub = stmt.get<ChannelSubscription>(userId, channelId);
+
+  return channelSub ?? null;
+}
+
+export function getChannelSubscriptionByUserId(state: AppState, userId: number) {
+  const stmt = state.prepare(
+    "select * from channelSubscription where forId = ?;");
+  if (!stmt) {
+    log.error(prepErr("get channel subscript by user id"));
+    return null;
+  }
+
+  const subs = stmt.all<ChannelSubscription>(userId);
+
+  return subs ?? null;
+}
 
 export type OwnedResources = {
   forId: number,
@@ -298,6 +387,71 @@ export type OwnedResources = {
   bio: number
 };
 
+export function createOwnedResources(state: AppState, userId: number) {
+  const stmt = state.prepare(`
+    insert into ownedResources (forId)
+    values (?)
+    returning *;
+  `);
+  if (!stmt) {
+    log.error(prepErr("create owned resources"));
+    return null;
+  }
+
+  const ownedResources = stmt.get<OwnedResources>(userId);
+
+  return ownedResources ?? null;
+}
+
+export function getOwnedResources(state: AppState, userId: number) {
+  const stmt = state.prepare("select * from ownedResources where forId = ?");
+  if (!stmt) {
+    log.error(prepErr("get owned resources"));
+    return null;
+  }
+
+  const ownedResources = stmt.get<OwnedResources>(userId);
+
+  return ownedResources ?? null;
+}
+
+export type ActionMetadata = {
+  forId: number,
+
+  battleCount: number,
+  metalCount: number,
+  elecCount: number,
+  bioCount: number
+};
+
+export function createActionMetadata(state: AppState, userId: number) {
+  const stmt = state.prepare(`
+    insert into actionMetadata (forId)
+    values (?)
+    returning *;
+  `);
+  if (!stmt) {
+    log.error(prepErr("create action metadata"));
+    return null;
+  }
+
+  const actionMetadata = stmt.get<ActionMetadata>(userId);
+
+  return actionMetadata ?? null;
+}
+
+export function getActionMetadata(state: AppState, userId: number) {
+  const stmt = state.prepare("select * from actionMetadata where forId = ?");
+  if (!stmt) {
+    log.error(prepErr("get action metadata"));
+    return null;
+  }
+
+  const actionMetadata = stmt.get<ActionMetadata>(userId);
+
+  return actionMetadata ?? null;
+}
+
 export type UserSession = {
   ipAddress: string,
   forId: number,
@@ -308,7 +462,7 @@ export type UserSession = {
   lastAccessedAt: string,
 }
 
-export async function createSessionForUser(
+export function createSessionForUser(
   state: AppState,
   address: string,
   userId: number
@@ -316,18 +470,19 @@ export async function createSessionForUser(
   const stmt = state.prepare(`
     insert into userSession (ipAddress, forId, sessionId, createdAt, lastAccessedAt)
     values (?, ?, ?, ?, ?)
+    return *;
   `);
   if (!stmt) {
-    log.error(`unable to create new session for ${userId} - ${address}`);
+    log.error(prepErr(`create session for ${userId} - ${address}`));
     return null;
   }
 
-  const sessionId = await auth.createSessionId();
+  const sessionId = auth.createSessionId();
   const now = dateUtil.now().toISOString();
 
-  stmt.run(address, userId, sessionId, now, now);
+  const sessionRow = stmt.get<UserSession>(address, userId, sessionId, now, now);
 
-  return sessionId;
+  return sessionRow ?? null;
 }
 
 export function getSessionByAddressAndId(
@@ -336,9 +491,9 @@ export function getSessionByAddressAndId(
   userId: number,
 ) {
   const stmt = state.prepare(
-    "select * from userSession where ipAddress = ? and forId = ? limit 1");
+    "select * from userSession where ipAddress = ? and forId = ? limit 1;");
   if (!stmt) {
-    log.error("unable to prepare sql statement to get user session by address and user id");
+    log.error(prepErr("get session by address and id"));
     return null;
   }
 
@@ -347,14 +502,33 @@ export function getSessionByAddressAndId(
   return session ?? null;
 }
 
+export function getUserBySession(state: AppState, sessionId: string) {
+  const stmt = state.prepare(
+    "select * from userSession where sessionId = ? limit 1;");
+  if (!stmt) {
+    log.error(prepErr("get user by sessionId"));
+    return null;
+  }
+
+  const userSession = stmt.get<UserSession>(sessionId);
+  if (!userSession) {
+    log.error(`no user session found for ${sessionId}`);
+    return null;
+  }
+
+  const user = getUserById(state, userSession.forId);
+
+  return user ?? null;
+}
+
 export function verifySessionId(
   state: AppState,
   sessionId: string,
 ) {
   const stmt = state.prepare(
-    "select * from userSession where sessionId = ?");
+    "select * from userSession where sessionId = ?;");
   if (!stmt) {
-    log.error("unable to prepare sql statement to get user session by session id");
+    log.error(prepErr("verify session id"));
     return false;
   }
 
@@ -374,15 +548,39 @@ export function verifySessionId(
     "HOURS", createdAt, dateUtil.now());
 
   if (diffInHours > 24) {
-    // TODO
+    deleteSessionId(state, sessionId);
+
+    return false;
   }
 
   return true;
 }
 
+export function deleteSessionId(state: AppState, sessionId: string) {
+  const stmt = state.prepare(
+    "delete from userSession where sessionId = ?;");
+  if (!stmt) {
+    log.error(prepErr("delete session id"));
+    return;
+  }
+
+  stmt.run(sessionId);
+}
+
+export function deleteAllSessionsByUserId(state: AppState, userId: number) {
+  const stmt = state.prepare(
+    "delete from userSession where forId = ?;");
+  if (!stmt) {
+    log.error(prepErr("delete all session by user id"));
+    return;
+  }
+
+  stmt.run(userId);
+}
+
 export function updateSessionLastAccessed(state: AppState, sessionId: string) {
   const stmt = state.prepare(
-    "update userSession set lastAccessedAt = ? where sessionId = ?");
+    "update userSession set lastAccessedAt = ? where sessionId = ?;");
   if (!stmt) {
     log.error(
       "unable to prepare sql statement to update user session last accessed date");

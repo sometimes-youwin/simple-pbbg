@@ -14,7 +14,7 @@ pub struct Message {
 
 impl Message {
     pub fn get(&self) -> String {
-        format!("{id}{msg}\n", id = self.message_type, msg = self.content)
+        format!("{id}{msg}</s>\n", id = self.message_type, msg = self.content)
     }
 }
 
@@ -52,7 +52,12 @@ impl History {
                 message_type: MessageType::System,
                 content: system_content,
             },
-            history: Vec::default(),
+            history: vec![
+                Message {
+                    message_type: MessageType::Assistant,
+                    content: "Hello, how may I help you today?".into(),
+                },
+            ],
         }
     }
 
@@ -62,6 +67,8 @@ impl History {
             prompt += message.get().as_str();
         }
         prompt += headers::ASSISTANT.trim();
+
+        tracing::debug!("{prompt}");
 
         prompt
     }

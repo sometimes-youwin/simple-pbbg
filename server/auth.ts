@@ -1,23 +1,6 @@
 import * as bcrypt from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
-import * as jwt from "https://deno.land/x/djwt@v3.0.2/mod.ts";
 import * as nanoid from "https://deno.land/x/nanoid@v3.0.0/mod.ts";
 
-import * as log from "./logger.ts";
-import * as dateUtil from "./date_util.ts";
-
-const JWT_KEY = await crypto.subtle.generateKey(
-  {
-    name: "HMAC",
-    hash: "SHA-512"
-  },
-  true,
-  [
-    "sign",
-    "verify"
-  ]
-);
-
-export const JWT_COOKIE_KEY = "token";
 export const SESSION_COOKIE_KEY = "session";
 
 /**
@@ -41,54 +24,10 @@ export async function comparePasswords(plaintext: string, hash: string) {
 }
 
 /**
- * Generate a salt using bcrypt.
- * @param log_rounds An optional number of log rounds.
- * @returns A bcrypt salt.
- */
-export async function generateSalt(log_rounds?: number) {
-  return await bcrypt.genSalt(log_rounds);
-}
-
-export type JwtOpts = {
-  expiration?: number,
-  notBefore?: number,
-}
-
-export async function createJwt(issuer: string, userId: number, opts?: JwtOpts) {
-  return await jwt.create(
-    {
-      alg: "HS512",
-      typ: "JWT"
-    },
-    {
-      iss: issuer,
-      // 60 seconds
-      exp: opts?.expiration ?? jwt.getNumericDate(60),
-      nbf: opts?.notBefore ?? jwt.getNumericDate(dateUtil.now()),
-
-      userId: userId
-    },
-    JWT_KEY
-  );
-}
-
-export async function verifyJwt(jwtInput: string) {
-  try {
-    const payload = await jwt.verify(jwtInput, JWT_KEY);
-
-    return payload;
-  } catch (err) {
-    log.error(`failed to verify jwt - ${err}`);
-
-    return null;
-  }
-}
-
-/**
  * An extremely basic way of generating a session.
  */
-export async function createSessionId() {
-  const randomId = await nanoid.nanoid();
+export function createSessionId() {
+  const randomId = nanoid.nanoid();
 
   return randomId;
 }
