@@ -1,8 +1,8 @@
 import { Database, Statement } from "@db/sqlite";
 
-import * as log from "/logger.ts";
-import * as rows from "/rows.ts";
-import { AppConfig, ClientMessage, GameMessage, } from "/model.ts";
+import * as log from "@/logger.ts";
+import * as row from "@/rows.ts";
+import { AppConfig, ClientMessage, GameMessage, } from "@/model.ts";
 
 type RawSql = string;
 
@@ -42,7 +42,7 @@ export class AppState {
   /**
    * Cached prepared statements.
    */
-  #preparedStmts = new Map<RawSql, Statement>();
+  #preparedStmts = new Map<RawSql, SafeStatement>();
   /**
    * Weird way of implementing an LRU. When statements are cached, the raw sql
    * is also inserted here. When the cache is full, the first element is popped
@@ -83,8 +83,8 @@ export class AppState {
       this.#preparedStmtCacheMax = opts.preparedStmtCacheMax;
     }
 
-    this.#channels.set(rows.SYSTEM_CHANNEL_ID, []);
-    this.#channels.set(rows.GLOBAL_CHANNEL_ID, []);
+    this.#channels.set(row.SYSTEM_CHANNEL_ID, []);
+    this.#channels.set(row.GLOBAL_CHANNEL_ID, []);
 
     log.info("created app state");
   }
@@ -93,11 +93,11 @@ export class AppState {
     const data: GameMessage.Base = evt.data;
     switch (data.type) {
       case "INTERNAL": {
-        this.#handleInternalMessage(data as GameMessage.Internal);
+        this.#handleInternalMessage(data as GameMessage.Internal.Base);
         break;
       }
       case "SYSTEM": {
-        this.sendChannel(rows.SYSTEM_CHANNEL_ID, (data as GameMessage.System).message ?? "empty system message");
+        this.sendChannel(row.SYSTEM_CHANNEL_ID, (data as GameMessage.System).message ?? "empty system message");
         break;
       }
       case "NONE":
@@ -108,8 +108,12 @@ export class AppState {
     }
   }
 
-  #handleInternalMessage(m: GameMessage.Internal) {
+  #handleInternalMessage(m: GameMessage.Internal.Base) {
     switch (m.command) {
+      case "SAVE_SINGLE": {
+        // TODO
+        break;
+      }
       case "SHUTDOWN": {
         this.shutdown();
         break;
@@ -152,14 +156,14 @@ export class AppState {
    */
   prepare(sql: string, opts?: AppStatePrepareOpts) {
     if (!opts?.cache) {
-      return this.#prepare(sql);
+      return new SafeStatement(this.#prepare(sql));
     }
 
     let stmt = this.#preparedStmts.get(sql) ?? null;
     if (!stmt) {
-      stmt = this.#prepare(sql);
-      if (!stmt) {
-        return null;
+      stmt = new SafeStatement(this.#prepare(sql));
+      if (!stmt.stmt) {
+        return stmt;
       }
 
       this.#preparedStmts.set(sql, stmt);
@@ -175,10 +179,10 @@ export class AppState {
     }
 
     // Guaranteed to exist since the statement is created if it does not exist
-    return stmt as Statement;
+    return stmt as SafeStatement;
   }
 
-  addUser(user: rows.User, address: ConnectAddress, ws: WebSocket) {
+  addUser(user: row.User, address: ConnectAddress, ws: WebSocket) {
     log.debug(`adding user ${user.id} from address ${address}`);
 
     this.#wsConnections.set(address, ws);
@@ -198,10 +202,31 @@ export class AppState {
       addresses.splice(addressIdx, 1);
     }
 
-    const internalMessage: ClientMessage.InternalAddUser = {
+    // TODO subscribe user to channels
+    const channelSubscriptions = row.getChannelSubscriptionByUserId(this, user.id);
+    if (!channelSubscriptions) {
+      // TODO stub
+      return;
+    }
+
+    const ownedResources = row.getOwnedResources(this, user.id);
+    if (!ownedResources) {
+      // TODO stub
+      return;
+    }
+
+    const actionMetadata = row.getActionMetadata(this, user.id);
+    if (!actionMetadata) {
+      // TODO stub
+      return;
+    }
+
+    const internalMessage: ClientMessage.Internal.AddUser = {
       type: "INTERNAL",
       command: "ADD_USER",
-      user
+      user,
+      ownedResources,
+      actionMetadata,
     };
 
     this.forwardClientMessage(internalMessage);
@@ -365,4 +390,54 @@ function findOrSetInMap<T>(map: Map<UserId | ChannelId, T[]>, key: UserId | Chan
   }
 
   return found;
+}
+
+/**
+ * Wrapper for a sql statement that handles improperly prepared statements.
+ */
+class SafeStatement {
+  stmt: Statement | null;
+
+  constructor(stmt: Statement | null) {
+    this.stmt = stmt;
+  }
+
+  // deno-lint-ignore no-explicit-any
+  run(...args: any[]) {
+    if (this.stmt) {
+      try {
+        return this.stmt.run(args);
+      } catch (err) {
+        log.error(err);
+      }
+    }
+
+    return 0;
+  }
+
+  // deno-lint-ignore no-explicit-any
+  get<T extends Record<string, unknown>>(...args: any[]) {
+    if (this.stmt) {
+      try {
+        return this.stmt.get<T>(args) ?? null;
+      } catch (err) {
+        log.error(err);
+      }
+    }
+
+    return null;
+  }
+
+  // deno-lint-ignore no-explicit-any
+  all<T extends Record<string, unknown>>(...args: any[]) {
+    if (this.stmt) {
+      try {
+        return this.stmt.all<T>(args);
+      } catch (err) {
+        log.error(err);
+      }
+    }
+
+    return null
+  }
 }

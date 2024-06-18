@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 
 import * as log from "https://deno.land/std@0.224.0/log/mod.ts";
-import { AppConfig } from "./model.ts";
+import { AppConfig } from "@/model.ts";
 
 export function setup(config: AppConfig) {
   // TODO will probably need more configuration in the future

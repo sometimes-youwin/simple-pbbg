@@ -1,4 +1,4 @@
-import * as rows from "/rows.ts";
+export * as Internal from "@/model/client_message_internal.ts";
 
 export type Type =
   "NONE" |
@@ -10,22 +10,6 @@ export type Base = {
   type: Type,
   [key: string]: unknown
 };
-
-export type InternalCommand =
-  "NONE" |
-  "ADD_USER" |
-  "REMOVE_USER";
-
-export type Internal = Base & {
-  type: "INTERNAL",
-  command: InternalCommand,
-};
-
-export type InternalAddUser = Internal & {
-  user: rows.User,
-};
-
-export type InternalRemoveUser = Internal;
 
 export type External = Base & {
   userId: number,

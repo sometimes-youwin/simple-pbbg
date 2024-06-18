@@ -1,9 +1,9 @@
 import { Database } from "@db/sqlite";
 
-import { AppState } from "/app_state.ts";
-import * as log from "/logger.ts";
-import * as dateUtil from "/date_util.ts";
-import * as auth from "/auth.ts";
+import { AppState } from "@/app_state.ts";
+import * as log from "@/logger.ts";
+import * as dateUtil from "@/date_util.ts";
+import * as auth from "@/auth.ts";
 
 /**
  * Types in this file are purposely mapped 1-to-1 with their sql equivalents.
@@ -24,10 +24,6 @@ import * as auth from "/auth.ts";
  * no validation functions should be defined since they are already handled by
  * the database.
  */
-
-function prepErr(reason: string) {
-  return `unable to prepare sql stmt - ${reason}`
-}
 
 /**
  * Apply migrations if they have not been applied yet.
@@ -255,10 +251,6 @@ export type LastAction = "NONE" | "BATTLE" | "METAL_SCRAP" | "ELEC_SCRAP" | "BIO
 export function userExists(state: AppState, username: string, email: string) {
   const stmt = state.prepare(
     "select * from user where username = ? or email = ?");
-  if (!stmt) {
-    log.error(prepErr("user exists"));
-    return false;
-  }
 
   const user = stmt.get<User>(username, email);
 
@@ -267,10 +259,6 @@ export function userExists(state: AppState, username: string, email: string) {
 
 export function getUserByUsername(state: AppState, username: string) {
   const stmt = state.prepare("select * from user where username = ? limit 1");
-  if (!stmt) {
-    log.error(prepErr("get user by username"));
-    return null;
-  }
 
   const user = stmt.get<User>(username);
 
@@ -279,10 +267,6 @@ export function getUserByUsername(state: AppState, username: string) {
 
 export function getUserById(state: AppState, id: number) {
   const stmt = state.prepare("select * from user where id = ? limit 1");
-  if (!stmt) {
-    log.error(prepErr("get user by id"));
-    return null;
-  }
 
   const user = stmt.get<User>(id);
 
@@ -300,13 +284,20 @@ export function createUser(
     values (?, ?, ?)
     returning *;
   `);
-  if (!stmt) {
-    log.error(prepErr("create user"));
-    return null;
-  }
 
   const user = stmt.get<User>(username, hashedPassword, email);
+
   return user ?? null;
+}
+
+export function saveUser(state: AppState, user: User) {
+  const stmt = state.prepare(`
+    update user
+    set lastAction = ?
+    where id = ?;
+  `);
+
+  stmt.run(user.lastAction, user.id);
 }
 
 export type ServerLog = {
@@ -339,7 +330,31 @@ export type Channel = {
   channelName: string,
 };
 
+export function createChannel(state: AppState, forId: number, channelName: string) {
+  const stmt = state.prepare(`
+    insert into channel (forId, channelName)
+    values (?, ?)
+    returning *;
+  `);
 
+  const channel = stmt.get<Channel>(forId, channelName);
+
+  return channel ?? null;
+}
+
+export function deleteChannel(state: AppState, channel: Channel) {
+  const stmt = state.prepare("delete from channel where id = ?");
+
+  stmt.run(channel.id);
+}
+
+export function getChannelByName(state: AppState, channelName: string) {
+  const stmt = state.prepare("select * from channel where channelName = ?");
+
+  const channel = stmt.get<Channel>(channelName);
+
+  return channel ?? null;
+}
 
 export type ChannelSubscription = {
   forId: number,
@@ -352,10 +367,6 @@ export function createChannelSubscription(state: AppState, userId: number, chann
     values (?, ?)
     returning *;
   `);
-  if (!stmt) {
-    log.error(prepErr("create channel subscription"));
-    return null;
-  }
 
   const channelSub = stmt.get<ChannelSubscription>(userId, channelId);
 
@@ -365,10 +376,6 @@ export function createChannelSubscription(state: AppState, userId: number, chann
 export function getChannelSubscriptionByUserId(state: AppState, userId: number) {
   const stmt = state.prepare(
     "select * from channelSubscription where forId = ?;");
-  if (!stmt) {
-    log.error(prepErr("get channel subscript by user id"));
-    return null;
-  }
 
   const subs = stmt.all<ChannelSubscription>(userId);
 
@@ -393,10 +400,6 @@ export function createOwnedResources(state: AppState, userId: number) {
     values (?)
     returning *;
   `);
-  if (!stmt) {
-    log.error(prepErr("create owned resources"));
-    return null;
-  }
 
   const ownedResources = stmt.get<OwnedResources>(userId);
 
@@ -405,14 +408,49 @@ export function createOwnedResources(state: AppState, userId: number) {
 
 export function getOwnedResources(state: AppState, userId: number) {
   const stmt = state.prepare("select * from ownedResources where forId = ?");
-  if (!stmt) {
-    log.error(prepErr("get owned resources"));
-    return null;
-  }
 
   const ownedResources = stmt.get<OwnedResources>(userId);
 
   return ownedResources ?? null;
+}
+
+export function saveOwnedResources(state: AppState, ownedResources: OwnedResources) {
+  const stmt = state.prepare(`
+    update ownedResources
+    set
+      credits = ?,
+      dust = ?,
+      shards = ?,
+
+      metal = ?,
+      elec = ?,
+      bio = ?,
+    where forId = ?;
+  `);
+
+  const {
+    credits,
+    dust,
+    shards,
+
+    metal,
+    elec,
+    bio,
+
+    forId
+  } = ownedResources;
+
+  stmt.run(
+    credits,
+    dust,
+    shards,
+
+    metal,
+    elec,
+    bio,
+
+    forId,
+  );
 }
 
 export type ActionMetadata = {
@@ -430,10 +468,6 @@ export function createActionMetadata(state: AppState, userId: number) {
     values (?)
     returning *;
   `);
-  if (!stmt) {
-    log.error(prepErr("create action metadata"));
-    return null;
-  }
 
   const actionMetadata = stmt.get<ActionMetadata>(userId);
 
@@ -442,14 +476,39 @@ export function createActionMetadata(state: AppState, userId: number) {
 
 export function getActionMetadata(state: AppState, userId: number) {
   const stmt = state.prepare("select * from actionMetadata where forId = ?");
-  if (!stmt) {
-    log.error(prepErr("get action metadata"));
-    return null;
-  }
 
   const actionMetadata = stmt.get<ActionMetadata>(userId);
 
   return actionMetadata ?? null;
+}
+
+export function saveActionMetadata(state: AppState, actionMetadata: ActionMetadata) {
+  const stmt = state.prepare(`
+    update actionMetadata
+    set
+      battleCount = ?,
+      metalCount = ?,
+      elecCount = ?,
+      bioCount = ?
+    where forId = ?;
+  `);
+
+  const {
+    forId,
+    battleCount,
+    metalCount,
+    elecCount,
+    bioCount,
+  } = actionMetadata;
+
+  stmt.run(
+    battleCount,
+    metalCount,
+    elecCount,
+    bioCount,
+
+    forId,
+  );
 }
 
 export type UserSession = {
@@ -472,10 +531,6 @@ export function createSessionForUser(
     values (?, ?, ?, ?, ?)
     return *;
   `);
-  if (!stmt) {
-    log.error(prepErr(`create session for ${userId} - ${address}`));
-    return null;
-  }
 
   const sessionId = auth.createSessionId();
   const now = dateUtil.now().toISOString();
@@ -492,10 +547,6 @@ export function getSessionByAddressAndId(
 ) {
   const stmt = state.prepare(
     "select * from userSession where ipAddress = ? and forId = ? limit 1;");
-  if (!stmt) {
-    log.error(prepErr("get session by address and id"));
-    return null;
-  }
 
   const session = stmt.get<UserSession>(address, userId);
 
@@ -505,10 +556,6 @@ export function getSessionByAddressAndId(
 export function getUserBySession(state: AppState, sessionId: string) {
   const stmt = state.prepare(
     "select * from userSession where sessionId = ? limit 1;");
-  if (!stmt) {
-    log.error(prepErr("get user by sessionId"));
-    return null;
-  }
 
   const userSession = stmt.get<UserSession>(sessionId);
   if (!userSession) {
@@ -527,10 +574,6 @@ export function verifySessionId(
 ) {
   const stmt = state.prepare(
     "select * from userSession where sessionId = ?;");
-  if (!stmt) {
-    log.error(prepErr("verify session id"));
-    return false;
-  }
 
   const session = stmt.get<UserSession>(sessionId);
   if (!session) {
@@ -559,10 +602,6 @@ export function verifySessionId(
 export function deleteSessionId(state: AppState, sessionId: string) {
   const stmt = state.prepare(
     "delete from userSession where sessionId = ?;");
-  if (!stmt) {
-    log.error(prepErr("delete session id"));
-    return;
-  }
 
   stmt.run(sessionId);
 }
@@ -570,10 +609,6 @@ export function deleteSessionId(state: AppState, sessionId: string) {
 export function deleteAllSessionsByUserId(state: AppState, userId: number) {
   const stmt = state.prepare(
     "delete from userSession where forId = ?;");
-  if (!stmt) {
-    log.error(prepErr("delete all session by user id"));
-    return;
-  }
 
   stmt.run(userId);
 }
@@ -581,13 +616,6 @@ export function deleteAllSessionsByUserId(state: AppState, userId: number) {
 export function updateSessionLastAccessed(state: AppState, sessionId: string) {
   const stmt = state.prepare(
     "update userSession set lastAccessedAt = ? where sessionId = ?;");
-  if (!stmt) {
-    log.error(
-      "unable to prepare sql statement to update user session last accessed date");
-    return false;
-  }
 
   stmt.run(dateUtil.now().toISOString(), sessionId);
-
-  return true;
 }

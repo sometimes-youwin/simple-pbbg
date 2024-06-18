@@ -1,3 +1,5 @@
+export * as Internal from "@/model/game_message_internal.ts";
+
 export type Type =
   "NONE" |
   "INTERNAL" |
@@ -7,16 +9,6 @@ export type Type =
 export type Base = {
   type: Type,
   [key: string]: unknown,
-}
-
-export type InternalCommand =
-  "NONE" |
-  "SHUTDOWN";
-
-export type Internal = Base & {
-  type: "INTERNAL",
-  command: InternalCommand,
-  comment: string,
 };
 
 export type System = Base & {
@@ -27,4 +19,4 @@ export type System = Base & {
 export type Global = Base & {
   type: "GLOBAL",
   message: string
-}
+};

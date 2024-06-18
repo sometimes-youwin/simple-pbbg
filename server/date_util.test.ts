@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.208.0/assert/assert_equals.ts";
-import { timeBetween } from "./date_util.ts";
+import { timeBetween } from "@/date_util.ts";
 
 Deno.test({
   name: "time between as milliseconds",

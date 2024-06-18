@@ -1,7 +1,8 @@
 import { delay } from "@std/async/delay";
 
-import * as log from "/logger.ts";
-import { GameMessage, ClientMessage } from "/model.ts";
+import * as log from "@/logger.ts";
+import { GameMessage, ClientMessage } from "@/model.ts";
+import { GameState } from "@/game/game_state.ts";
 
 /**
  * Default to a 5 second timer.
@@ -12,13 +13,10 @@ let running = true;
 let sleepTime = DEFAULT_SLEEP_TIME;
 
 function gameMain() {
-  sendMessageEvent({
-    type: "SYSTEM",
-    payload: "hello"
-  });
+  //
 }
 
-async function runLoop(f: () => void) {
+async function runLoop(state: GameState, f: () => void) {
   while (running) {
     const start = Date.now();
 
@@ -34,50 +32,13 @@ async function runLoop(f: () => void) {
   }
 }
 
-function receiveMessageEvent(evt: MessageEvent) {
-  const data: ClientMessage.Base = evt.data;
-  switch (data.type) {
-    case "INTERNAL": {
-      handleClientMessageInternal(data as ClientMessage.Internal);
-      break;
-    }
-    case "NONE":
-    default: {
-      log.error(`unhandled message ${data}`);
-      break;
-    }
-  }
-}
-
-function handleClientMessageInternal(m: ClientMessage.Internal) {
-  switch (m.command) {
-    case "ADD_USER": {
-      const data = m as ClientMessage.InternalAddUser;
-      const user = data.user;
-
-      break;
-    }
-    case "REMOVE_USER": {
-      break;
-    }
-    case "NONE":
-    default: {
-      log.error(`unhandled internal message ${m}`);
-      break;
-    }
-  }
-}
-
-function sendMessageEvent(message: GameMessage.Base) {
-  // @ts-ignore - property not properly defined by linter
-  self.postMessage(message);
-}
-
 async function main() {
-  // @ts-ignore - property not properly defined by linter
-  self.onmessage = receiveMessageEvent
+  const gameState = new GameState();
 
-  await runLoop(gameMain)
+  // @ts-ignore - property not properly defined by linter
+  self.onmessage = gameState.receiveMessageEvent;
+
+  await runLoop(gameState, gameMain)
 }
 
 if (import.meta.main) {

@@ -1,12 +1,12 @@
-import { AppState } from "/app_state.ts";
-import * as rows from "/rows.ts";
-import * as log from "/logger.ts";
+import { AppState } from "@/app_state.ts";
+import * as row from "@/rows.ts";
+import * as log from "@/logger.ts";
 
 export type CreateUserOutput = {
-  user: rows.User,
-  channelSubs: rows.ChannelSubscription[],
-  ownedResources: rows.OwnedResources,
-  actionMetadata: rows.ActionMetadata,
+  user: row.User,
+  channelSubs: row.ChannelSubscription[],
+  ownedResources: row.OwnedResources,
+  actionMetadata: row.ActionMetadata,
 };
 
 export function createUser(
@@ -19,28 +19,28 @@ export function createUser(
 
   try {
     const res = state.db.transaction((): CreateUserOutput => {
-      const user = rows.createUser(state, username, hashedPassword, email);
+      const user = row.createUser(state, username, hashedPassword, email);
       if (!user) {
         throw new Error("user null");
       }
 
-      const systemChannelSub = rows.createChannelSubscription(
-        state, user.id, rows.SYSTEM_CHANNEL_ID);
+      const systemChannelSub = row.createChannelSubscription(
+        state, user.id, row.SYSTEM_CHANNEL_ID);
       if (!systemChannelSub) {
         throw new Error("system channel sub null")
       }
-      const globalChannelSub = rows.createChannelSubscription(
-        state, user.id, rows.GLOBAL_CHANNEL_ID);
+      const globalChannelSub = row.createChannelSubscription(
+        state, user.id, row.GLOBAL_CHANNEL_ID);
       if (!globalChannelSub) {
         throw new Error("global channel sub null");
       }
 
-      const ownedResources = rows.createOwnedResources(state, user.id);
+      const ownedResources = row.createOwnedResources(state, user.id);
       if (!ownedResources) {
         throw new Error("owned resources null");
       }
 
-      const actionMetadata = rows.createActionMetadata(state, user.id);
+      const actionMetadata = row.createActionMetadata(state, user.id);
       if (!actionMetadata) {
         throw new Error("action metadata null");
       }

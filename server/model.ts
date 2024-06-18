@@ -1,8 +1,10 @@
 import { Body } from "jsr:@oak/oak@^16.1.0/body";
 
-import * as log from "/logger.ts";
-export * as GameMessage from "/model/game_message.ts";
-export * as ClientMessage from "/model/client_message.ts";
+import * as log from "@/logger.ts";
+import * as row from "@/rows.ts";
+
+export * as GameMessage from "@/model/game_message.ts";
+export * as ClientMessage from "@/model/client_message.ts";
 
 /**
  * Configuration for the app.
@@ -127,3 +129,9 @@ export function validateLoginRequest(req: LoginRequest) {
     "password"
   ]);
 }
+
+export type Player = {
+  user: row.User,
+  ownedResources: row.OwnedResources,
+  actionMetadata: row.ActionMetadata,
+};

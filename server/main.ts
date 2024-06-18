@@ -3,13 +3,16 @@ import { Router } from "@oak/oak/router";
 import { Database, Statement } from "@db/sqlite";
 import { existsSync } from "jsr:@std/fs@^0.221.0/exists";
 
-import { AppConfig, LoginRequest, RegisterRequest, apiErrorString, parseArgs, tryParseJson, validateLoginRequest, validateRegisterRequest } from "/model.ts";
-import * as rows from "/rows.ts";
-import { User, applyMigrations } from "/rows.ts";
-import { AppState } from "/app_state.ts";
-import * as log from "/logger.ts";
-import * as auth from "/auth.ts";
-import { createUser } from "/user_util.ts";
+import {
+  AppConfig, LoginRequest, RegisterRequest, apiErrorString, parseArgs, tryParseJson,
+  validateLoginRequest, validateRegisterRequest
+} from "@/model.ts";
+import * as row from "@/rows.ts";
+import { User, applyMigrations } from "@/rows.ts";
+import { AppState } from "@/app_state.ts";
+import * as log from "@/logger.ts";
+import * as auth from "@/auth.ts";
+import { createUser } from "@/user_util.ts";
 
 const APP_NAME = "Simple PBBG";
 const VERSION = "0.1.0";
@@ -54,7 +57,7 @@ function initRouter(router: Router, config: AppConfig) {
       return;
     }
 
-    if (!rows.verifySessionId(appState, existingSession)) {
+    if (!row.verifySessionId(appState, existingSession)) {
       ctx.response.redirect("/");
       await cookies.set(auth.SESSION_COOKIE_KEY, "invalid");
       return;
@@ -90,7 +93,7 @@ function initRouter(router: Router, config: AppConfig) {
 
     const { username, password, email } = body;
 
-    const userExists = rows.userExists(appState, username, email);
+    const userExists = row.userExists(appState, username, email);
     if (userExists) {
       ctx.throw(400, apiErrorString({
         type: "REGISTER",
@@ -99,7 +102,7 @@ function initRouter(router: Router, config: AppConfig) {
       return;
     }
 
-    const user = rows.createUser(appState, username, await auth.hashPassword(password), email);
+    const user = row.createUser(appState, username, await auth.hashPassword(password), email);
     if (!user) {
       ctx.throw(500, apiErrorString({
         type: "REGISTER",
@@ -109,7 +112,7 @@ function initRouter(router: Router, config: AppConfig) {
       return;
     }
 
-    const userSession = rows.createSessionForUser(appState, req.ip, user.id);
+    const userSession = row.createSessionForUser(appState, req.ip, user.id);
     if (!userSession) {
       ctx.throw(500, apiErrorString({
         type: "REGISTER",
@@ -169,7 +172,7 @@ function initRouter(router: Router, config: AppConfig) {
       return;
     }
 
-    const user = rows.getUserByUsername(appState, username);
+    const user = row.getUserByUsername(appState, username);
     if (!user || !await auth.comparePasswords(password, user.hashedPassword)) {
       // Do not specify if the user or password was incorrect
       ctx.throw(401, apiErrorString({
@@ -179,7 +182,7 @@ function initRouter(router: Router, config: AppConfig) {
       return;
     }
 
-    const userSession = rows.createSessionForUser(appState, req.ip, user.id);
+    const userSession = row.createSessionForUser(appState, req.ip, user.id);
     if (!userSession) {
       ctx.throw(500, apiErrorString({
         type: "LOGIN",
@@ -207,7 +210,7 @@ function initRouter(router: Router, config: AppConfig) {
       return;
     }
 
-    if (!rows.verifySessionId(appState, sessionToken)) {
+    if (!row.verifySessionId(appState, sessionToken)) {
       ctx.throw(401, apiErrorString({
         type: "WEBSOCKET",
         path: req.url.pathname,
@@ -216,7 +219,7 @@ function initRouter(router: Router, config: AppConfig) {
       return;
     }
 
-    const user = rows.getUserBySession(appState, sessionToken);
+    const user = row.getUserBySession(appState, sessionToken);
     if (!user) {
       ctx.throw(500, apiErrorString({
         type: "WEBSOCKET",
@@ -259,7 +262,7 @@ function initRouter(router: Router, config: AppConfig) {
 
     appState.addUser(user, address, socket);
 
-    const channelSubs = rows.getChannelSubscriptionByUserId(appState, user.id);
+    const channelSubs = row.getChannelSubscriptionByUserId(appState, user.id);
     if (!channelSubs) {
       ctx.throw(500, apiErrorString({
         type: "WEBSOCKET",
